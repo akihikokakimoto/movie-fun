@@ -1,16 +1,18 @@
 package org.superbiz.moviefun.albums;
 
+import com.amazonaws.services.dynamodbv2.xspec.B;
 import org.apache.tika.Tika;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.superbiz.moviefun.blobstore.Blob;
+import org.superbiz.moviefun.blobstore.BlobStore;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -25,11 +27,13 @@ import static java.nio.file.Files.readAllBytes;
 public class AlbumsController {
 
     private final AlbumsBean albumsBean;
+    private final BlobStore blobStore;
 
-    public AlbumsController(AlbumsBean albumsBean) {
+    @Autowired
+    public AlbumsController(BlobStore blobStore, AlbumsBean albumsBean) {
+        this.blobStore = blobStore;
         this.albumsBean = albumsBean;
     }
-
 
     @GetMapping
     public String index(Map<String, Object> model) {
@@ -45,22 +49,42 @@ public class AlbumsController {
 
     @PostMapping("/{albumId}/cover")
     public String uploadCover(@PathVariable long albumId, @RequestParam("file") MultipartFile uploadedFile) throws IOException {
-        saveUploadToFile(uploadedFile, getCoverFile(albumId));
+        saveUploadToFile(uploadedFile, getCoverFile(albumId), String.valueOf(albumId));
 
         return format("redirect:/albums/%d", albumId);
     }
 
     @GetMapping("/{albumId}/cover")
     public HttpEntity<byte[]> getCover(@PathVariable long albumId) throws IOException, URISyntaxException {
-        Path coverFilePath = getExistingCoverPath(albumId);
-        byte[] imageBytes = readAllBytes(coverFilePath);
-        HttpHeaders headers = createImageHttpHeaders(coverFilePath, imageBytes);
+        Blob b = blobStore.get(String.valueOf(albumId)).get();
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+
+        byte[] bytes = new byte[1024];
+        while(true){
+            int len = b.inputStream.read(bytes);
+            if(len < 0){
+                break;
+            }
+            baos.write(bytes);
+        }
+        baos.close();
+
+        byte[] imageBytes = baos.toByteArray();
+        HttpHeaders headers = createImageHttpHeaders(b.contentType, imageBytes);
 
         return new HttpEntity<>(imageBytes, headers);
     }
 
+    private void saveUploadToFile(MultipartFile uploadedFile, File targetFile, String albumId) throws IOException {
+        Blob b = new Blob(albumId, uploadedFile.getInputStream(), uploadedFile.getContentType(), uploadedFile.getSize());
+        blobStore.put(b);
+    }
 
+    /*
     private void saveUploadToFile(@RequestParam("file") MultipartFile uploadedFile, File targetFile) throws IOException {
+        Blob b = new Blob()
+
         targetFile.delete();
         targetFile.getParentFile().mkdirs();
         targetFile.createNewFile();
@@ -69,7 +93,15 @@ public class AlbumsController {
             outputStream.write(uploadedFile.getBytes());
         }
     }
+    */
 
+    private HttpHeaders createImageHttpHeaders(String contentType, byte[] imageBytes) throws IOException {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(contentType));
+        headers.setContentLength(imageBytes.length);
+        return headers;
+    }
+/*
     private HttpHeaders createImageHttpHeaders(Path coverFilePath, byte[] imageBytes) throws IOException {
         String contentType = new Tika().detect(coverFilePath);
 
@@ -78,7 +110,7 @@ public class AlbumsController {
         headers.setContentLength(imageBytes.length);
         return headers;
     }
-
+*/
     private File getCoverFile(@PathVariable long albumId) {
         String coverFileName = format("covers/%d", albumId);
         return new File(coverFileName);
