@@ -17,10 +17,13 @@ import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Map;
+import java.util.Optional;
+import org.apache.tika.io.IOUtils;
 
 import static java.lang.ClassLoader.getSystemResource;
 import static java.lang.String.format;
 import static java.nio.file.Files.readAllBytes;
+import static org.springframework.http.MediaType.IMAGE_JPEG_VALUE;
 
 @Controller
 @RequestMapping("/albums")
@@ -56,24 +59,51 @@ public class AlbumsController {
 
     @GetMapping("/{albumId}/cover")
     public HttpEntity<byte[]> getCover(@PathVariable long albumId) throws IOException, URISyntaxException {
-        Blob b = blobStore.get(String.valueOf(albumId)).get();
+        //Blob b = blobStore.get(String.valueOf(albumId)).get();
 
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        Optional<Blob> maybeCoverBlob = blobStore.get(String.valueOf(albumId));
+        Blob b = maybeCoverBlob.orElseGet(this::buildDefaultCoverBlob);
 
-        byte[] bytes = new byte[1024];
-        while(true){
-            int len = b.inputStream.read(bytes);
-            if(len < 0){
-                break;
-            }
-            baos.write(bytes);
-        }
-        baos.close();
 
-        byte[] imageBytes = baos.toByteArray();
-        HttpHeaders headers = createImageHttpHeaders(b.contentType, imageBytes);
+//        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+//
+//        byte[] bytes = new byte[1024];
+//        while(true){
+//            int len = b.inputStream.read(bytes);
+//            if(len < 0){
+//                break;
+//            }
+//            baos.write(bytes);
+//
+//        }
+//
+//
+//
+//
+//
+//
+//
+//        baos.close();
+//
+//        byte[] imageBytes = baos.toByteArray();
+//        HttpHeaders headers = createImageHttpHeaders(b.contentType, imageBytes);
+
+         //
+
+        byte[] imageBytes = IOUtils.toByteArray(b.inputStream);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(b.contentType));
+        headers.setContentLength(imageBytes.length);
 
         return new HttpEntity<>(imageBytes, headers);
+    }
+
+    private Blob buildDefaultCoverBlob() {
+        ClassLoader classLoader = getClass().getClassLoader();
+        InputStream input = classLoader.getResourceAsStream("default-cover.jpg");
+
+        return new Blob("default-cover", input, IMAGE_JPEG_VALUE, 100);
     }
 
     private void saveUploadToFile(MultipartFile uploadedFile, File targetFile, String albumId) throws IOException {
